@@ -722,7 +722,7 @@ func syncTFFiles(srcDir, dstDir string) error {
 // fail once the token expires; the benchmark itself continues. Use the service
 // role key path for CI or unattended long-running benchmarks.
 func resolveDriverToken(cfg *config.Config) (string, error) {
-	if cfg.Store.Mode != config.ModeRemote {
+	if cfg.Store.Mode == config.ModeLocal {
 		return "", nil
 	}
 	if cfg.Store.ServiceRoleKey != "" {
