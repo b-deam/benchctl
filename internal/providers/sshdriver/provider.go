@@ -349,7 +349,11 @@ func (p *Provider) Bootstrap(ctx context.Context, req engine.BootstrapRequest) e
 // across invocations.
 func buildResumeCmd(cfg *config.Config, driverToken, runID string) string {
 	remoteEnv := cfg.RemoteEnv()
-	remoteEnv["BENCHCTL_STORE_AUTH_TOKEN"] = driverToken
+	if driverToken != "" {
+		remoteEnv["BENCHCTL_STORE_AUTH_TOKEN"] = driverToken
+	} else {
+		delete(remoteEnv, "BENCHCTL_STORE_AUTH_TOKEN")
+	}
 
 	envKeys := make([]string, 0, len(remoteEnv))
 	for k := range remoteEnv {
@@ -709,11 +713,18 @@ func syncTFFiles(srcDir, dstDir string) error {
 //  1. cfg.Store.ServiceRoleKey (CI and superuser path)
 //  2. User JWT from ~/.benchctl/credentials (interactive user path)
 //
+// In local store mode there is no remote store to write to (the driver keeps
+// its own copy of the run record, see buildStateImportCmd), so no credential
+// is needed and it returns an empty token without error.
+//
 // Note: the driver receives only the access token, not the refresh token, so it
 // cannot renew its credentials. Store state updates on the driver will silently
 // fail once the token expires; the benchmark itself continues. Use the service
 // role key path for CI or unattended long-running benchmarks.
 func resolveDriverToken(cfg *config.Config) (string, error) {
+	if cfg.Store.Mode == config.ModeLocal {
+		return "", nil
+	}
 	if cfg.Store.ServiceRoleKey != "" {
 		return cfg.Store.ServiceRoleKey, nil
 	}
