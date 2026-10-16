@@ -58,6 +58,55 @@ func TestBuildResumeCmdOverridesAuthToken(t *testing.T) {
 	}
 }
 
+// In local store mode there is no remote store for the driver to write to, so
+// no credential is needed.
+func TestResolveDriverTokenLocalModeNeedsNoCredential(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // no ~/.benchctl/credentials
+
+	cfg := &config.Config{Store: config.StoreConfig{Mode: config.ModeLocal}}
+	got, err := resolveDriverToken(cfg)
+	if err != nil {
+		t.Fatalf("local mode must not require a driver token, got error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("local mode token = %q, want empty", got)
+	}
+}
+
+// Remote mode keeps requiring a credential
+func TestResolveDriverTokenRemoteModeRequiresCredential(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // no ~/.benchctl/credentials
+
+	cfg := remoteCfg()
+	cfg.Store.ServiceRoleKey = ""
+	if _, err := resolveDriverToken(cfg); err == nil {
+		t.Fatal("remote mode without a credential must fail")
+	}
+
+	cfg.Store.ServiceRoleKey = "service-key"
+	got, err := resolveDriverToken(cfg)
+	if err != nil || got != "service-key" {
+		t.Errorf("resolveDriverToken = %q, %v; want service-key, nil", got, err)
+	}
+}
+
+// In local mode there is no driver token, so the command must not carry any
+// auth token
+func TestBuildResumeCmdWithoutDriverTokenOmitsAuthToken(t *testing.T) {
+	cfg := &config.Config{Store: config.StoreConfig{
+		Mode:      config.ModeLocal,
+		AuthToken: "local-token-must-not-leak",
+	}}
+	got := buildResumeCmd(cfg, "", "run-123")
+
+	if strings.Contains(got, "BENCHCTL_STORE_AUTH_TOKEN") {
+		t.Errorf("auth token variable must be omitted\ngot: %s", got)
+	}
+	if strings.Contains(got, "local-token-must-not-leak") {
+		t.Errorf("local auth token leaked to the driver instance\ngot: %s", got)
+	}
+}
+
 func TestBuildResumeCmdOmitsUnsetValues(t *testing.T) {
 	cfg := &config.Config{Store: config.StoreConfig{Mode: config.ModeLocal}}
 	got := buildResumeCmd(cfg, "driver-token", "run-123")
