@@ -112,7 +112,13 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			fmt.Printf("    %s: %s\n", name, cfg.Tags[name])
+			key := "tags." + name
+			if cfg.OverridesShared(key) {
+				overrides = append(overrides, key)
+				fmt.Printf("    %s: %s (%s, overrides shared configuration)\n", name, cfg.Tags[name], cfg.Source(key))
+				continue
+			}
+			fmt.Printf("    %s: %s (%s)\n", name, cfg.Tags[name], cfg.Source(key))
 		}
 	}
 

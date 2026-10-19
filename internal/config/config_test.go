@@ -840,6 +840,50 @@ func TestOverridesShared(t *testing.T) {
 	}
 }
 
+// An environment variable winning does not hide a home value that also hides a
+// shared one.
+func TestOverridesShared_EnvDoesNotHide(t *testing.T) {
+	path := setConfigFile(t)
+	writeShared(t, testShared)
+	t.Setenv("BENCHCTL_STORE_MODE", "local")
+	if err := os.WriteFile(path, []byte("store:\n  mode: local\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.OverridesShared("store.mode") {
+		t.Error("store.mode in home hides the shared value even while the environment wins")
+	}
+}
+
+// Tags are tracked like other keys, and an empty home tag falls through to the
+// shared one.
+func TestLoad_TagOverridesAndEmptyFallthrough(t *testing.T) {
+	path := setConfigFile(t)
+	writeShared(t, testShared)
+	if err := os.WriteFile(path, []byte("tags:\n  org: \"\"\n  team: mine\n  extra: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Tags["org"]; got != "example-org" {
+		t.Errorf("tags.org = %q, want example-org (empty home tag falls through)", got)
+	}
+	if got := cfg.Source("tags.org"); got != SourceShared {
+		t.Errorf("Source(tags.org) = %v, want shared", got)
+	}
+	if got := cfg.Source("tags.team"); got != SourceHome {
+		t.Errorf("Source(tags.team) = %v, want home", got)
+	}
+	if got := cfg.KeysOverridingShared(); len(got) != 1 || got[0] != "tags.team" {
+		t.Errorf("KeysOverridingShared() = %v, want [tags.team]", got)
+	}
+}
+
 // With no other layer, every value comes from the default configuration.
 func TestLoad_DefaultConfiguration(t *testing.T) {
 	setConfigFile(t)

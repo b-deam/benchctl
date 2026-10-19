@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -304,16 +305,15 @@ func Load() (*Config, error) {
 	cfg.overridesShared = make(map[string]bool)
 	for _, e := range envTable {
 		envVal := os.Getenv(e.env)
+		// Flag it even if the values are equal or the environment wins, as the
+		// home value still hides the shared one.
+		cfg.overridesShared[e.key] = e.get(&cfg) != "" && e.get(&shared) != ""
 		switch {
 		case envVal != "":
 			e.set(&cfg, envVal)
 			cfg.sources[e.key] = SourceEnv
 		case e.get(&cfg) != "":
 			cfg.sources[e.key] = SourceHome
-			// Flag it even if the value equals the shared one: the home value
-			// still wins, so if the shared value changes later, this user
-			// keeps the old one.
-			cfg.overridesShared[e.key] = e.get(&shared) != ""
 		case e.get(&shared) != "":
 			e.set(&cfg, e.get(&shared))
 			cfg.sources[e.key] = SourceShared
@@ -325,15 +325,22 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Tags merge per name: home configuration tags win over shared ones.
+	// non-empty home configuration tags win over shared
+	for name, value := range cfg.Tags {
+		if value != "" {
+			cfg.sources["tags."+name] = SourceHome
+			cfg.overridesShared["tags."+name] = shared.Tags[name] != ""
+		}
+	}
 	for name, value := range shared.Tags {
-		if _, ok := cfg.Tags[name]; ok {
+		if cfg.Tags[name] != "" {
 			continue
 		}
 		if cfg.Tags == nil {
 			cfg.Tags = map[string]string{}
 		}
 		cfg.Tags[name] = value
+		cfg.sources["tags."+name] = SourceShared
 	}
 
 	if cfg.Store.Mode != ModeLocal && cfg.Store.Mode != ModeRemote {
@@ -462,7 +469,14 @@ func (c *Config) KeysOverridingShared() []string {
 			keys = append(keys, e.key)
 		}
 	}
-	return keys
+	var tagKeys []string
+	for name := range c.Tags {
+		if c.overridesShared["tags."+name] {
+			tagKeys = append(tagKeys, "tags."+name)
+		}
+	}
+	sort.Strings(tagKeys)
+	return append(keys, tagKeys...)
 }
 
 // Source identifies the layer a setting's effective value came from.
