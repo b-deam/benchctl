@@ -779,7 +779,8 @@ func setTarget(key string) (section, field string, err error) {
 	if !slices.Contains(FileKeys(), key) {
 		return "", "", fmt.Errorf("config: unknown key %q; valid keys are %s, and tags.<name>", key, strings.Join(FileKeys(), ", "))
 	}
-	// A dotted key is "<section>.<field>"
+	// A dotted key is "<section>.<field>".
+	// TODO: Deeper keys need Set, Unset and mappingValue to walk a path instead of a section.
 	section, field, _ = strings.Cut(key, ".")
 	if field == "" {
 		return "", section, nil
