@@ -23,8 +23,8 @@ var configShowCmd = &cobra.Command{
 
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
-	Short: "Set a value in the home configuration",
-	Long: `set writes a single key to the home configuration (~/.benchctl/config.yaml).
+	Short: "Set a value in the user configuration",
+	Long: `set writes a single key to the user configuration (~/.benchctl/config.yaml).
 It overrides the shared and default configuration for that key.
 
 Valid keys: store.mode, store.url, store.anon_key, store.refresh_interval,
@@ -37,8 +37,8 @@ var configUnsetOverridesShared bool
 
 var configUnsetCmd = &cobra.Command{
 	Use:   "unset <key> | --overrides-shared",
-	Short: "Remove a value from the home configuration",
-	Long: `unset removes a single key from the home configuration, so it falls back to
+	Short: "Remove a value from the user configuration",
+	Long: `unset removes a single key from the user configuration, so it falls back to
 the shared configuration (if any) or the default configuration. Valid keys
 are the same as for set.
 
@@ -72,7 +72,7 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	fmt.Println("Home configuration:")
+	fmt.Println("User configuration:")
 	fmt.Printf("  %s\n", path)
 	if sp := config.SharedConfigPath(); sp != "" {
 		fmt.Println("Shared configuration (read-only):")
@@ -124,7 +124,7 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 
 	if len(overrides) > 0 {
 		fmt.Println()
-		fmt.Println("Your home configuration overrides the shared configuration for these keys:")
+		fmt.Println("Your user configuration overrides the shared configuration for these keys:")
 		for _, key := range overrides {
 			fmt.Printf("  %s\n", key)
 		}
@@ -162,12 +162,12 @@ func runConfigUnset(_ *cobra.Command, args []string) error {
 	if removed {
 		fmt.Printf("Unset %s.\n", key)
 	} else {
-		fmt.Printf("%s was not set in the home configuration.\n", key)
+		fmt.Printf("%s was not set in the user configuration.\n", key)
 	}
 	return nil
 }
 
-// unsetOverridesShared removes every home configuration key that overrides
+// unsetOverridesShared removes every user configuration key that overrides
 // the shared configuration.
 func unsetOverridesShared() error {
 	cfg, err := config.Load()
@@ -176,7 +176,7 @@ func unsetOverridesShared() error {
 	}
 	keys := cfg.KeysOverridingShared()
 	if len(keys) == 0 {
-		fmt.Println("No keys in the home configuration override the shared configuration.")
+		fmt.Println("No keys in the user configuration override the shared configuration.")
 		return nil
 	}
 	for _, key := range keys {

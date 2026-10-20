@@ -3,7 +3,7 @@
 //
 //  1. Environment variables: BENCHCTL_*, e.g. BENCHCTL_STORE_MODE. Secrets
 //     come only from here.
-//  2. Home configuration: ~/.benchctl/config.yaml (see Path), the user's own
+//  2. User configuration: ~/.benchctl/config.yaml (see Path), the user's own
 //     settings, written by Set and Unset.
 //  3. Shared configuration: <prefix>/share/benchctl/config.yaml next to the
 //     binary (see SharedConfigPath), read-only. It lets whoever distributes
@@ -27,10 +27,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// defaultConfigTemplate is written verbatim to a new home configuration file.
+// defaultConfigTemplate is written verbatim to a new user configuration file.
 // It is a hand-authored file (not encoder output) so it can carry explanatory
 // comments. It consists of comments only and sets no keys: anything in the
-// home configuration overrides the shared and default configuration, so a new
+// user configuration overrides the shared and default configuration, so a new
 // file must not hide them. Set adds keys below the comments as the user sets
 // them.
 //
@@ -98,7 +98,7 @@ type Config struct {
 	// sources records, per dotted key, which layer the effective value came
 	// from. Populated by Load.
 	sources map[string]Source
-	// overridesShared records the dotted keys whose home configuration value
+	// overridesShared records the dotted keys whose user configuration value
 	// hides a value from the shared configuration. Populated by Load.
 	overridesShared map[string]bool
 }
@@ -209,7 +209,7 @@ const (
 // pathEnvVars lists the variables above in the order EnvStates reports them.
 var pathEnvVars = []string{envConfigFile, envSharedConfigFile}
 
-// Path returns the location of the home configuration file.
+// Path returns the location of the user configuration file.
 //
 // BENCHCTL_CONFIG_FILE overrides the default location when set to a
 // non-empty value. An empty value has no special meaning: unset and
@@ -256,7 +256,7 @@ func sharedConfigBesideExecutable(exe string) string {
 }
 
 // Load resolves every setting from the four layers described in the package
-// doc. It creates the home configuration file from the template if it does
+// doc. It creates the user configuration file from the template if it does
 // not yet exist. An empty value counts as unset in every layer. The returned
 // Config always has a non-nil Tags map and a valid Store.Mode.
 func Load() (*Config, error) {
@@ -306,14 +306,14 @@ func Load() (*Config, error) {
 	for _, e := range envTable {
 		envVal := os.Getenv(e.env)
 		// Flag it even if the values are equal or the environment wins, as the
-		// home value still hides the shared one.
+		// user value still hides the shared one.
 		cfg.overridesShared[e.key] = e.get(&cfg) != "" && e.get(&shared) != ""
 		switch {
 		case envVal != "":
 			e.set(&cfg, envVal)
 			cfg.sources[e.key] = SourceEnv
 		case e.get(&cfg) != "":
-			cfg.sources[e.key] = SourceHome
+			cfg.sources[e.key] = SourceUser
 		case e.get(&shared) != "":
 			e.set(&cfg, e.get(&shared))
 			cfg.sources[e.key] = SourceShared
@@ -325,10 +325,10 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// non-empty home configuration tags win over shared
+	// non-empty user configuration tags win over shared
 	for name, value := range cfg.Tags {
 		if value != "" {
-			cfg.sources["tags."+name] = SourceHome
+			cfg.sources["tags."+name] = SourceUser
 			cfg.overridesShared["tags."+name] = shared.Tags[name] != ""
 		}
 	}
@@ -453,8 +453,8 @@ func (c *Config) Source(dottedKey string) Source {
 	return c.sources[dottedKey]
 }
 
-// OverridesShared reports whether the home configuration sets dottedKey
-// although the shared configuration has a value for it too. The home value
+// OverridesShared reports whether the user configuration sets dottedKey
+// although the shared configuration has a value for it too. The user value
 // keeps winning when the shared configuration changes; Unset removes it.
 func (c *Config) OverridesShared(dottedKey string) bool {
 	return c.overridesShared[dottedKey]
@@ -484,7 +484,7 @@ type Source int
 
 const (
 	SourceUnset   Source = iota
-	SourceHome           // home configuration
+	SourceUser           // user configuration
 	SourceEnv            // environment variable
 	SourceShared         // shared configuration
 	SourceDefault        // default configuration
@@ -493,8 +493,8 @@ const (
 // String returns a human-readable label for s.
 func (s Source) String() string {
 	switch s {
-	case SourceHome:
-		return "home configuration"
+	case SourceUser:
+		return "user configuration"
 	case SourceEnv:
 		return "env"
 	case SourceShared:
@@ -543,12 +543,12 @@ func EnvStates() []EnvState {
 	return states
 }
 
-// Set writes a single dotted key to the home configuration file, preserving all existing
+// Set writes a single dotted key to the user configuration file, preserving all existing
 // comments. Accepted keys are "store.mode", "store.url", "store.anon_key",
 // "store.refresh_interval", "metrics.endpoint", "metrics.username",
 // "username", and "tags.<name>".
 // Secret keys are rejected with the environment variable to set instead. Set
-// and Unset are the only writers of the home configuration file: there is no bulk-save
+// and Unset are the only writers of the user configuration file: there is no bulk-save
 // path, since re-marshalling the Config struct would discard the comments
 // they are careful to keep.
 func Set(key, value string) error {
@@ -580,7 +580,7 @@ func Set(key, value string) error {
 	return writeDocument(path, root)
 }
 
-// Unset removes a single dotted key from the home configuration file,
+// Unset removes a single dotted key from the user configuration file,
 // preserving all other content and comments, so the key falls back to the
 // shared configuration, if any, or the default configuration. It reports
 // whether the key was present. Accepted keys are the same as for Set.
@@ -629,7 +629,7 @@ func removeKey(m *yaml.Node, key string) {
 	}
 }
 
-// readDocument loads the home configuration file (creating it from the
+// readDocument loads the user configuration file (creating it from the
 // template if missing) as a YAML node tree, so callers can edit it without
 // losing comments. The root's single child is always the top-level mapping.
 func readDocument() (string, *yaml.Node, error) {
@@ -663,7 +663,7 @@ func readDocument() (string, *yaml.Node, error) {
 	return path, &root, nil
 }
 
-// writeDocument encodes root back to the home configuration file at path. A document
+// writeDocument encodes root back to the user configuration file at path. A document
 // without any keys is written as its comments alone rather than as "{}".
 func writeDocument(path string, root *yaml.Node) error {
 	if len(root.Content[0].Content) == 0 {

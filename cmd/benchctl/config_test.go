@@ -163,7 +163,7 @@ func TestRunConfigShow_RedactsSensitiveEnvVars(t *testing.T) {
 }
 
 // config show points at "unset --overrides-shared", which removes exactly the
-// keys it flagged and leaves the rest of the home configuration alone.
+// keys it flagged and leaves the rest of the user configuration alone.
 func TestRunConfigUnset_OverridesShared(t *testing.T) {
 	path := setConfigFile(t)
 	shared := filepath.Join(t.TempDir(), "shared.yaml")
@@ -201,7 +201,7 @@ func TestRunConfigUnset_OverridesShared(t *testing.T) {
 	if keys := cfg.KeysOverridingShared(); len(keys) != 0 {
 		t.Errorf("still overriding: %v", keys)
 	}
-	if cfg.Username != "alice" || cfg.Source("store.refresh_interval") != config.SourceHome {
+	if cfg.Username != "alice" || cfg.Source("store.refresh_interval") != config.SourceUser {
 		t.Errorf("keys without a shared value were touched: username=%q refresh_interval from %v", cfg.Username, cfg.Source("store.refresh_interval"))
 	}
 

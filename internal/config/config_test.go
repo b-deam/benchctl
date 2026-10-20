@@ -53,7 +53,7 @@ func TestLoad_MissingFileCreatesTemplate(t *testing.T) {
 	}
 }
 
-// The template for a new home configuration must contain only comments, no
+// The template for a new user configuration must contain only comments, no
 // keys. A key with a value would override the shared and default
 // configuration from the first run.
 func TestTemplateHasNoKeys(t *testing.T) {
@@ -182,8 +182,8 @@ tags: {}
 	if cfg.Store.URL != "https://file.example.com" {
 		t.Fatalf("Store.URL = %q, want file value to win over empty env var", cfg.Store.URL)
 	}
-	if src := cfg.Source("store.url"); src != SourceHome {
-		t.Errorf("Source(store.url) = %v, want SourceHome", src)
+	if src := cfg.Source("store.url"); src != SourceUser {
+		t.Errorf("Source(store.url) = %v, want SourceUser", src)
 	}
 }
 
@@ -465,7 +465,7 @@ func TestSetAndLoad_CreateParentDirectories(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("home configuration not created in nested dir: %v", err)
+		t.Fatalf("user configuration not created in nested dir: %v", err)
 	}
 
 	cfg, err := Load()
@@ -529,8 +529,8 @@ tags: {}
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if src := cfg.Source("store.url"); src != SourceHome {
-		t.Errorf("Source(store.url) = %v, want SourceHome", src)
+	if src := cfg.Source("store.url"); src != SourceUser {
+		t.Errorf("Source(store.url) = %v, want SourceUser", src)
 	}
 	if src := cfg.Source("store.anon_key"); src != SourceEnv {
 		t.Errorf("Source(store.anon_key) = %v, want SourceEnv", src)
@@ -608,7 +608,7 @@ tags:
   team: team-a
 `
 
-// A fresh install (no home configuration yet) must get every value from the
+// A fresh install (no user configuration yet) must get every value from the
 // shared configuration: the template written on first run may not shadow any.
 func TestLoad_SharedFillsFreshConfig(t *testing.T) {
 	setConfigFile(t)
@@ -631,7 +631,7 @@ func TestLoad_SharedFillsFreshConfig(t *testing.T) {
 	}
 }
 
-// Each key resolves independently, first match wins: env, then the home
+// Each key resolves independently, first match wins: env, then the user
 // configuration, then the shared configuration, then the default configuration.
 func TestLoad_PrecedenceEnvHomeShared(t *testing.T) {
 	path := setConfigFile(t)
@@ -649,7 +649,7 @@ func TestLoad_PrecedenceEnvHomeShared(t *testing.T) {
 		key, got, want string
 		src            Source
 	}{
-		{"store.mode", string(cfg.Store.Mode), "local", SourceHome},
+		{"store.mode", string(cfg.Store.Mode), "local", SourceUser},
 		{"store.url", cfg.Store.URL, "https://shared.supabase.co", SourceShared},
 		{"metrics.endpoint", cfg.Metrics.Endpoint, "https://from-env.example.com", SourceEnv},
 		{"store.refresh_interval", cfg.Store.RefreshInterval, "30s", SourceDefault},
@@ -664,7 +664,7 @@ func TestLoad_PrecedenceEnvHomeShared(t *testing.T) {
 	}
 }
 
-// The shared configuration never leaks into the home configuration: config set
+// The shared configuration never leaks into the user configuration: config set
 // writes only the key it is given.
 func TestSet_DoesNotCopyShared(t *testing.T) {
 	path := setConfigFile(t)
@@ -678,7 +678,7 @@ func TestSet_DoesNotCopyShared(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(data), "shared-anon") || strings.Contains(string(data), "shared.supabase.co") {
-		t.Fatalf("shared configuration copied into the home configuration:\n%s", data)
+		t.Fatalf("shared configuration copied into the user configuration:\n%s", data)
 	}
 }
 
@@ -813,7 +813,7 @@ func TestUnset_RejectsSecretsAndUnknownKeys(t *testing.T) {
 	}
 }
 
-// A home configuration value overrides the shared configuration only when that
+// A user configuration value overrides the shared configuration only when that
 // has a value for the key too, and even an identical copy counts.
 func TestOverridesShared(t *testing.T) {
 	path := setConfigFile(t)
@@ -840,7 +840,7 @@ func TestOverridesShared(t *testing.T) {
 	}
 }
 
-// An environment variable winning does not hide a home value that also hides a
+// An environment variable winning does not hide a user value that also hides a
 // shared one.
 func TestOverridesShared_EnvDoesNotHide(t *testing.T) {
 	path := setConfigFile(t)
@@ -854,11 +854,11 @@ func TestOverridesShared_EnvDoesNotHide(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !cfg.OverridesShared("store.mode") {
-		t.Error("store.mode in home hides the shared value even while the environment wins")
+		t.Error("store.mode in the user configuration hides the shared value even while the environment wins")
 	}
 }
 
-// Tags are tracked like other keys, and an empty home tag falls through to the
+// Tags are tracked like other keys, and an empty user tag falls through to the
 // shared one.
 func TestLoad_TagOverridesAndEmptyFallthrough(t *testing.T) {
 	path := setConfigFile(t)
@@ -871,13 +871,13 @@ func TestLoad_TagOverridesAndEmptyFallthrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := cfg.Tags["org"]; got != "example-org" {
-		t.Errorf("tags.org = %q, want example-org (empty home tag falls through)", got)
+		t.Errorf("tags.org = %q, want example-org (empty user tag falls through)", got)
 	}
 	if got := cfg.Source("tags.org"); got != SourceShared {
 		t.Errorf("Source(tags.org) = %v, want shared", got)
 	}
-	if got := cfg.Source("tags.team"); got != SourceHome {
-		t.Errorf("Source(tags.team) = %v, want home", got)
+	if got := cfg.Source("tags.team"); got != SourceUser {
+		t.Errorf("Source(tags.team) = %v, want user", got)
 	}
 	if got := cfg.KeysOverridingShared(); len(got) != 1 || got[0] != "tags.team" {
 		t.Errorf("KeysOverridingShared() = %v, want [tags.team]", got)
@@ -994,7 +994,7 @@ func TestSet_IntoEmptySection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Metrics.Endpoint != "https://vm.example.com" || cfg.Source("metrics.endpoint") != SourceHome {
+	if cfg.Metrics.Endpoint != "https://vm.example.com" || cfg.Source("metrics.endpoint") != SourceUser {
 		t.Errorf("metrics.endpoint = %q (%v), want the value just set", cfg.Metrics.Endpoint, cfg.Source("metrics.endpoint"))
 	}
 	if cfg.Store.Mode != ModeRemote {

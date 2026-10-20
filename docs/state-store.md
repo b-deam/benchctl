@@ -9,7 +9,7 @@ Both modes support every command, including `--async` runs on an EC2 or GCE driv
 `store.mode` selects the store implementation. benchctl resolves it in this order:
 
 1. `BENCHCTL_STORE_MODE` environment variable
-2. `store.mode` in the home configuration (`~/.benchctl/config.yaml`)
+2. `store.mode` in the user configuration (`~/.benchctl/config.yaml`)
 3. `store.mode` in the shared configuration, if your benchctl was distributed with one
 4. Default configuration: `local`
 
@@ -25,7 +25,7 @@ An empty value counts as unset, so resolution falls through to the next layer.
 | `local` (default) | SQLite | `~/.benchctl/state.db` | None | This machine |
 | `remote` | Supabase (PostgREST) | `runs` table at `store.url` | `store.anon_key` (config or `BENCHCTL_STORE_ANON_KEY`) | Everyone with access to the project |
 
-If your benchctl was distributed with a shared configuration, it may already set these (check with `benchctl config show`). Otherwise set `store.mode` with `benchctl config set store.mode remote`, and set `store.url` and `store.anon_key` the same way. A key set in the home configuration overrides the shared configuration.
+If your benchctl was distributed with a shared configuration, it may already set these (check with `benchctl config show`). Otherwise set `store.mode` with `benchctl config set store.mode remote`, and set `store.url` and `store.anon_key` the same way. A key set in the user configuration overrides the shared configuration.
 
 ## Async runs in local mode
 
