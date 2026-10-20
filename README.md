@@ -67,7 +67,7 @@ Why a shared configuration as well as a user one? The shared configuration lets 
 - `BENCHCTL_CONFIG_FILE` moves the user configuration elsewhere.
 - benchctl finds the shared configuration at `../share/benchctl/config.yaml` relative to its binary, after resolving symlinks, so a package that installs `bin/benchctl` can install the file next to it. This path can be overridden with `BENCHCTL_SHARED_CONFIG_FILE`.
 
-`benchctl config show` prints every effective setting and the layer it comes from. It flags user configuration values that override the shared configuration. You can use `benchctl config unset <key>` to remove specific user configuration values, or `--overrides-shared` to remove them all and use all the values from the shared configuration file.
+`benchctl config show` prints every effective setting and the layer it comes from, followed by any lower layers whose values it overrides. You can use `benchctl config unset <key>` to remove a user configuration value, or `benchctl config use-shared` to remove user configuration values that overrides the shared configuration. Neither touches environment variables, these continue taking precedence until you unset them.
 
 ## Quick start
 

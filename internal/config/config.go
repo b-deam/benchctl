@@ -18,8 +18,10 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -98,10 +100,18 @@ type Config struct {
 	// sources records, per dotted key, which layer the effective value came
 	// from. Populated by Load.
 	sources map[string]Source
-	// overridesShared records the dotted keys whose user configuration value
-	// hides a value from the shared configuration. Populated by Load.
-	overridesShared map[string]bool
+	// userOverridesShared records the dotted keys that both the user and the
+	// shared configuration set, so the user value overrides the shared one.
+	// Populated by Load.
+	userOverridesShared map[string]bool
+	// envOverrides records the dotted keys whose environment variable wins
+	// over a value in the user or shared configuration, in envTable order.
+	// Populated by Load.
+	envOverrides []string
 }
+
+// tagKeyPrefix precedes a tag name to form its dotted key, e.g. "tags.team".
+const tagKeyPrefix = "tags."
 
 // envEntry describes one BENCHCTL_* environment variable: the dotted config
 // key it overlays, whether it holds a secret, and how to read/write it on a
@@ -199,6 +209,19 @@ var envTable = []envEntry{
 	},
 }
 
+// FileKeys lists the settings that can be written to the user configuration
+// file, in the order "benchctl config show" lists them. Secrets are left out,
+// as they come only from the environment
+func FileKeys() []string {
+	var keys []string
+	for _, e := range envTable {
+		if !e.secret {
+			keys = append(keys, e.key)
+		}
+	}
+	return keys
+}
+
 // Environment variables that locate the configuration files. They are not
 // settings, so they live outside envTable.
 const (
@@ -280,78 +303,90 @@ func Load() (*Config, error) {
 		data = []byte(defaultConfigTemplate)
 	}
 
-	var cfg Config
-	if err := parseConfig(data, path, &cfg); err != nil {
+	var userCfg Config
+	if err := parseConfig(data, path, &userCfg); err != nil {
 		return nil, err
 	}
 
-	var def Config
-	if err := parseConfig(defaultConfig, "default configuration", &def); err != nil {
+	var defCfg Config
+	if err := parseConfig(defaultConfig, "default configuration", &defCfg); err != nil {
 		return nil, err
 	}
 
-	var shared Config
+	var sharedCfg Config
 	if sharedPath != "" {
 		sdata, err := os.ReadFile(sharedPath)
 		if err != nil {
 			return nil, fmt.Errorf("config: read shared configuration %s: %w", sharedPath, err)
 		}
-		if err := parseConfig(sdata, sharedPath, &shared); err != nil {
+		if err := parseConfig(sdata, sharedPath, &sharedCfg); err != nil {
 			return nil, err
 		}
 	}
 
-	cfg.sources = make(map[string]Source, len(envTable))
-	cfg.overridesShared = make(map[string]bool)
+	// effectiveCfg starts as the user configuration and
+	// takes each key from the highest layer that sets it.
+	effectiveCfg := userCfg
+	effectiveCfg.sources = make(map[string]Source, len(envTable))
+	effectiveCfg.userOverridesShared = make(map[string]bool)
 	for _, e := range envTable {
 		envVal := os.Getenv(e.env)
-		// Flag it even if the values are equal or the environment wins, as the
-		// user value still hides the shared one.
-		cfg.overridesShared[e.key] = e.get(&cfg) != "" && e.get(&shared) != ""
+		// Flag it even if the values are equal or the environment wins: the
+		// user value still overrides the shared one in the files.
+		effectiveCfg.userOverridesShared[e.key] = e.get(&userCfg) != "" && e.get(&sharedCfg) != ""
 		switch {
 		case envVal != "":
-			e.set(&cfg, envVal)
-			cfg.sources[e.key] = SourceEnv
-		case e.get(&cfg) != "":
-			cfg.sources[e.key] = SourceUser
-		case e.get(&shared) != "":
-			e.set(&cfg, e.get(&shared))
-			cfg.sources[e.key] = SourceShared
-		case e.get(&def) != "":
-			e.set(&cfg, e.get(&def))
-			cfg.sources[e.key] = SourceDefault
+			if e.get(&userCfg) != "" || e.get(&sharedCfg) != "" {
+				effectiveCfg.envOverrides = append(effectiveCfg.envOverrides, e.key)
+			}
+			e.set(&effectiveCfg, envVal)
+			effectiveCfg.sources[e.key] = SourceEnv
+		case e.get(&userCfg) != "":
+			effectiveCfg.sources[e.key] = SourceUser
+		case e.get(&sharedCfg) != "":
+			e.set(&effectiveCfg, e.get(&sharedCfg))
+			effectiveCfg.sources[e.key] = SourceShared
+		case e.get(&defCfg) != "":
+			e.set(&effectiveCfg, e.get(&defCfg))
+			effectiveCfg.sources[e.key] = SourceDefault
 		default:
-			cfg.sources[e.key] = SourceUnset
+			effectiveCfg.sources[e.key] = SourceUnset
 		}
 	}
 
-	// non-empty user configuration tags win over shared
-	for name, value := range cfg.Tags {
-		if value != "" {
-			cfg.sources["tags."+name] = SourceUser
-			cfg.overridesShared["tags."+name] = shared.Tags[name] != ""
-		}
-	}
-	for name, value := range shared.Tags {
-		if cfg.Tags[name] != "" {
+	// An empty tag counts as unset, so drop it
+	effectiveCfg.Tags = maps.Clone(userCfg.Tags)
+	for name, value := range effectiveCfg.Tags {
+		key := tagKeyPrefix + name
+		if value == "" {
+			delete(effectiveCfg.Tags, name)
 			continue
 		}
-		if cfg.Tags == nil {
-			cfg.Tags = map[string]string{}
+		// Non-empty user configuration tags win over shared.
+		effectiveCfg.sources[key] = SourceUser
+		effectiveCfg.userOverridesShared[key] = sharedCfg.Tags[name] != ""
+	}
+	for name, value := range sharedCfg.Tags {
+		key := tagKeyPrefix + name
+		if value == "" || effectiveCfg.Tags[name] != "" {
+			continue
 		}
-		cfg.Tags[name] = value
-		cfg.sources["tags."+name] = SourceShared
+		if effectiveCfg.Tags == nil {
+			effectiveCfg.Tags = map[string]string{}
+		}
+		effectiveCfg.Tags[name] = value
+		effectiveCfg.sources[key] = SourceShared
 	}
 
-	if cfg.Store.Mode != ModeLocal && cfg.Store.Mode != ModeRemote {
-		return nil, fmt.Errorf("config: store.mode %q is invalid (valid values: %q, %q)", cfg.Store.Mode, ModeLocal, ModeRemote)
+	if effectiveCfg.Store.Mode != ModeLocal && effectiveCfg.Store.Mode != ModeRemote {
+		return nil, fmt.Errorf("config: store.mode %q is invalid (valid values: %q, %q)", effectiveCfg.Store.Mode, ModeLocal, ModeRemote)
 	}
 
-	if cfg.Tags == nil {
-		cfg.Tags = map[string]string{}
+	if effectiveCfg.Tags == nil {
+		effectiveCfg.Tags = map[string]string{}
 	}
 
-	return &cfg, nil
+	return &effectiveCfg, nil
 }
 
 // parseConfig decodes a config document into cfg, rejecting unknown keys.
@@ -453,26 +488,57 @@ func (c *Config) Source(dottedKey string) Source {
 	return c.sources[dottedKey]
 }
 
-// OverridesShared reports whether the user configuration sets dottedKey
-// although the shared configuration has a value for it too. The user value
-// keeps winning when the shared configuration changes; Unset removes it.
-func (c *Config) OverridesShared(dottedKey string) bool {
-	return c.overridesShared[dottedKey]
+// Value returns the effective value of dottedKey (e.g. "store.url" or
+// "tags.team"), or "" if it is unset.
+func (c *Config) Value(dottedKey string) string {
+	if name, ok := strings.CutPrefix(dottedKey, tagKeyPrefix); ok {
+		return c.Tags[name]
+	}
+	for _, e := range envTable {
+		if e.key == dottedKey {
+			return e.get(c)
+		}
+	}
+	return ""
 }
 
-// KeysOverridingShared returns every dotted key for which OverridesShared is
+// EnvOverrideKeys returns every dotted key whose environment variable
+// overrides a value set in the user or shared configuration, in the order
+// "benchctl config show" lists them.
+func (c *Config) EnvOverrideKeys() []string {
+	return c.envOverrides
+}
+
+// EnvVar returns the name of the environment variable that overlays dottedKey,
+// or "" if there is none (tags have no variable).
+func EnvVar(dottedKey string) string {
+	for _, e := range envTable {
+		if e.key == dottedKey {
+			return e.env
+		}
+	}
+	return ""
+}
+
+// UserOverridesShared reports whether the user configuration sets dottedKey
+// although the shared configuration has a value for it too.
+func (c *Config) UserOverridesShared(dottedKey string) bool {
+	return c.userOverridesShared[dottedKey]
+}
+
+// UserOverrideKeys returns every dotted key for which UserOverridesShared is
 // true, in the order "benchctl config show" lists them.
-func (c *Config) KeysOverridingShared() []string {
+func (c *Config) UserOverrideKeys() []string {
 	var keys []string
 	for _, e := range envTable {
-		if c.overridesShared[e.key] {
+		if c.userOverridesShared[e.key] {
 			keys = append(keys, e.key)
 		}
 	}
 	var tagKeys []string
 	for name := range c.Tags {
-		if c.overridesShared["tags."+name] {
-			tagKeys = append(tagKeys, "tags."+name)
+		if c.userOverridesShared[tagKeyPrefix+name] {
+			tagKeys = append(tagKeys, tagKeyPrefix+name)
 		}
 	}
 	sort.Strings(tagKeys)
@@ -544,9 +610,7 @@ func EnvStates() []EnvState {
 }
 
 // Set writes a single dotted key to the user configuration file, preserving all existing
-// comments. Accepted keys are "store.mode", "store.url", "store.anon_key",
-// "store.refresh_interval", "metrics.endpoint", "metrics.username",
-// "username", and "tags.<name>".
+// comments. Accepted keys are FileKeys and "tags.<name>".
 // Secret keys are rejected with the environment variable to set instead. Set
 // and Unset are the only writers of the user configuration file: there is no bulk-save
 // path, since re-marshalling the Config struct would discard the comments
@@ -706,22 +770,21 @@ func rejectSecret(key string) error {
 // that section. It returns an error for unknown keys, mirroring the keys
 // documented on Set.
 func setTarget(key string) (section, field string, err error) {
-	switch {
-	case key == "store.mode" || key == "store.url" || key == "store.anon_key" || key == "store.refresh_interval":
-		return "store", strings.TrimPrefix(key, "store."), nil
-	case key == "metrics.endpoint" || key == "metrics.username":
-		return "metrics", strings.TrimPrefix(key, "metrics."), nil
-	case key == "username":
-		return "", "username", nil
-	case strings.HasPrefix(key, "tags."):
-		name := strings.TrimPrefix(key, "tags.")
+	if name, ok := strings.CutPrefix(key, tagKeyPrefix); ok {
 		if name == "" {
 			return "", "", fmt.Errorf("config: invalid key %q: tag name must not be empty", key)
 		}
 		return "tags", name, nil
-	default:
-		return "", "", fmt.Errorf("config: unknown key %q; valid keys are store.mode, store.url, store.anon_key, store.refresh_interval, metrics.endpoint, metrics.username, username, and tags.<name>", key)
 	}
+	if !slices.Contains(FileKeys(), key) {
+		return "", "", fmt.Errorf("config: unknown key %q; valid keys are %s, and tags.<name>", key, strings.Join(FileKeys(), ", "))
+	}
+	// A dotted key is "<section>.<field>"
+	section, field, _ = strings.Cut(key, ".")
+	if field == "" {
+		return "", section, nil
+	}
+	return section, field, nil
 }
 
 // mappingValue returns the mapping node for the given top-level key within

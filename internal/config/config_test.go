@@ -815,7 +815,7 @@ func TestUnset_RejectsSecretsAndUnknownKeys(t *testing.T) {
 
 // A user configuration value overrides the shared configuration only when that
 // has a value for the key too, and even an identical copy counts.
-func TestOverridesShared(t *testing.T) {
+func TestUserOverridesShared(t *testing.T) {
 	path := setConfigFile(t)
 	writeShared(t, testShared)
 	if err := os.WriteFile(path, []byte("store:\n  url: \"https://shared.supabase.co\"\nusername: alice\n"), 0o600); err != nil {
@@ -826,23 +826,23 @@ func TestOverridesShared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.OverridesShared("store.url") {
+	if !cfg.UserOverridesShared("store.url") {
 		t.Error("store.url equal to the shared value should still count as overriding it")
 	}
-	if cfg.OverridesShared("username") {
+	if cfg.UserOverridesShared("username") {
 		t.Error("username is not in the shared configuration, so it overrides nothing")
 	}
-	if got := cfg.KeysOverridingShared(); len(got) != 1 || got[0] != "store.url" {
-		t.Errorf("KeysOverridingShared() = %v, want [store.url]", got)
+	if got := cfg.UserOverrideKeys(); len(got) != 1 || got[0] != "store.url" {
+		t.Errorf("UserOverrideKeys() = %v, want [store.url]", got)
 	}
-	if cfg.OverridesShared("store.anon_key") {
+	if cfg.UserOverridesShared("store.anon_key") {
 		t.Error("store.anon_key comes from the shared configuration, so it does not override anything")
 	}
 }
 
-// An environment variable winning does not hide a user value that also hides a
-// shared one.
-func TestOverridesShared_EnvDoesNotHide(t *testing.T) {
+// A user value counts as overriding the shared one even when an environment
+// variable wins over both.
+func TestUserOverridesShared_EvenWhenEnvWins(t *testing.T) {
 	path := setConfigFile(t)
 	writeShared(t, testShared)
 	t.Setenv("BENCHCTL_STORE_MODE", "local")
@@ -853,8 +853,8 @@ func TestOverridesShared_EnvDoesNotHide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.OverridesShared("store.mode") {
-		t.Error("store.mode in the user configuration hides the shared value even while the environment wins")
+	if !cfg.UserOverridesShared("store.mode") {
+		t.Error("store.mode is set in the user and shared configuration, so the user value should count as overriding, even though the environment wins")
 	}
 }
 
@@ -879,8 +879,28 @@ func TestLoad_TagOverridesAndEmptyFallthrough(t *testing.T) {
 	if got := cfg.Source("tags.team"); got != SourceUser {
 		t.Errorf("Source(tags.team) = %v, want user", got)
 	}
-	if got := cfg.KeysOverridingShared(); len(got) != 1 || got[0] != "tags.team" {
-		t.Errorf("KeysOverridingShared() = %v, want [tags.team]", got)
+	if got := cfg.UserOverrideKeys(); len(got) != 1 || got[0] != "tags.team" {
+		t.Errorf("UserOverrideKeys() = %v, want [tags.team]", got)
+	}
+}
+
+func TestLoad_EmptyTagsAreDropped(t *testing.T) {
+	path := setConfigFile(t)
+	writeShared(t, "tags:\n  region: \"\"\n")
+	if err := os.WriteFile(path, []byte("tags:\n  org: \"\"\n  team: \"\"\n  keep: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tags) != 1 || cfg.Tags["keep"] != "x" {
+		t.Errorf("Tags = %v, want only keep=x", cfg.Tags)
+	}
+	for _, name := range []string{"org", "team", "region"} {
+		if got := cfg.Source("tags." + name); got != SourceUnset {
+			t.Errorf("Source(tags.%s) = %v, want unset", name, got)
+		}
 	}
 }
 
