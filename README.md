@@ -52,7 +52,7 @@ Caveats:
 
 ## Configuration
 
-benchctl resolves each setting on its own from four layers. The first layer that has a value wins:
+benchctl resolves each setting from four layers in the order specified below:
 
 | # | Layer | Where | Set by |
 |---|---|---|---|
@@ -64,10 +64,10 @@ benchctl resolves each setting on its own from four layers. The first layer that
 Why a shared configuration as well as a user one? The shared configuration lets whoever distributes benchctl to a group of users give them all the same settings, such as a common remote state store and metrics endpoint, by shipping a file alongside the benchctl binary, for example in a package. Users don't copy anything into their own files, so a changed value in the shared configuration reaches everyone in the next update. The user configuration holds what each person chooses for themselves, and overrides the shared configuration key by key. If you do not use a shared configuration, then you can just rely on the user and default configurations.
 
 - Credentials (tokens, passwords, the service-role key) come only from environment variables, never put them in a shared configuration.
-- `BENCHCTL_CONFIG_FILE` moves the user configuration elsewhere.
+- `BENCHCTL_CONFIG_FILE` sets the path benchctl reads the user configuration from, instead of `~/.benchctl/config.yaml`.
 - benchctl finds the shared configuration at `../share/benchctl/config.yaml` relative to its binary, after resolving symlinks, so a package that installs `bin/benchctl` can install the file next to it. This path can be overridden with `BENCHCTL_SHARED_CONFIG_FILE`.
 
-`benchctl config show` prints every effective setting and the layer it comes from, followed by any lower layers whose values it overrides. You can use `benchctl config unset <key>` to remove a user configuration value, or `benchctl config use-shared` to remove user configuration values that overrides the shared configuration. Neither touches environment variables, these continue taking precedence until you unset them.
+`benchctl config show` prints every effective setting and the layer it comes from. It also lists the keys where your user configuration overrides the shared configuration, and the keys where an environment variable overrides a configuration file. You can use `benchctl config unset <key>` to remove a user configuration value, or `benchctl config use-shared` to remove the user configuration values that override the shared configuration. Neither touches environment variables, which keep taking precedence until you unset them.
 
 ## Quick start
 
